@@ -110,10 +110,10 @@ This workflow was hosted on [Railway](https://railway.app/) using a self-hosted 
 
 ---
 ## Screenshots
-n8n Workflow
+### n8n Workflow
 <img width="1912" height="944" alt="image" src="https://github.com/user-attachments/assets/abc0c651-6c87-4d6e-8d8e-b5e221e2406f" />
 
-Telegram Bot in action
+### Telegram Bot in action
 <img width="370" height="728" alt="image" src="https://github.com/user-attachments/assets/a5e308b4-57ea-4d00-8269-c3dd06628a42" />
 <img width="368" height="726" alt="image" src="https://github.com/user-attachments/assets/252b77cd-d9d8-4a43-b1f9-5ba8896bd653" />
 
