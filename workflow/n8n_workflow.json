@@ -1,0 +1,158 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const userQuestion = $('Telegram Trigger').first()?.json?.message?.text || 'No question provided';\nconst chatId = $('Telegram Trigger').first()?.json?.message?.chat?.id;\n\n// Parse the raw array format from Google Sheets API\nconst rawData = $('Get Songs').first().json.values;\nconst headers = rawData[0]; // [\"Year\", \"Movie\", \"Songs\", \"Singer\", \"Lyricist\", \"Director\", \"Actor\"]\nconst rows = rawData.slice(1).map(row => {\n  const obj = {};\n  headers.forEach((h, i) => { obj[h] = row[i] || ''; });\n  return obj;\n});\n\nconst q = userQuestion.toLowerCase();\n\nfunction getSingers(row) {\n  return (row.Singer || '').split(',').map(s => s.trim()).filter(Boolean);\n}\nfunction rowMatchesSinger(row, name) {\n  return getSingers(row).some(s => s.toLowerCase().includes(name.toLowerCase()));\n}\nfunction rowMatchesActor(row, name) {\n  return (row.Actor || '').toLowerCase().includes(name.toLowerCase());\n}\nfunction isSoloSong(row) {\n  return getSingers(row).length === 1;\n}\n\nconst allSingers = [...new Set(rows.flatMap(r => getSingers(r)))];\nconst allActors  = [...new Set(rows.map(r => r.Actor).filter(Boolean))];\n\nconst mentionedSingers = allSingers.filter(s => q.includes(s.toLowerCase()));\nconst mentionedActors  = allActors.filter(a => q.includes(a.toLowerCase()));\n\nlet yearFrom = null, yearTo = null;\nconst decadeMatch = q.match(/(\\d{4})s/);\nconst rangeMatch  = q.match(/(\\d{4})\\s*(to|-)\\s*(\\d{4})/);\nconst singleYear  = q.match(/\\b(19|20)\\d{2}\\b/);\n\nif (decadeMatch) {\n  yearFrom = parseInt(decadeMatch[1]);\n  yearTo   = yearFrom + 9;\n} else if (rangeMatch) {\n  yearFrom = parseInt(rangeMatch[1]);\n  yearTo   = parseInt(rangeMatch[3]);\n} else if (singleYear) {\n  yearFrom = yearTo = parseInt(singleYear[0]);\n}\n\nlet filtered = rows.filter(r => r.Songs && r.Year);\n\nif (yearFrom) filtered = filtered.filter(r => parseInt(r.Year) >= yearFrom && parseInt(r.Year) <= (yearTo || yearFrom));\n\nmentionedSingers.forEach(s => {\n  filtered = filtered.filter(r => rowMatchesSinger(r, s));\n});\n\nmentionedActors.forEach(a => {\n  filtered = filtered.filter(r => rowMatchesActor(r, a));\n});\n\nif (q.includes('solo')) {\n  if (mentionedSingers.length > 0) {\n    filtered = filtered.filter(r => isSoloSong(r) && rowMatchesSinger(r, mentionedSingers[0]));\n  } else {\n    filtered = filtered.filter(r => isSoloSong(r));\n  }\n}\n\nlet dataForLLM = '';\n\nif (q.includes('top') && q.includes('year')) {\n  const counts = {};\n  rows.forEach(r => { if (r.Year) counts[r.Year] = (counts[r.Year] || 0) + 1; });\n  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);\n  dataForLLM = 'Songs per year (sorted):\\n' + sorted.map(e => `${e[0]}: ${e[1]} songs`).join('\\n');\n\n} else if (q.includes('top') && q.includes('singer')) {\n  const counts = {};\n  rows.forEach(r => getSingers(r).forEach(s => { counts[s] = (counts[s] || 0) + 1; }));\n  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);\n  dataForLLM = 'Songs per singer (sorted):\\n' + sorted.map(e => `${e[0]}: ${e[1]} songs`).join('\\n');\n\n} else if (q.includes('top') && q.includes('actor')) {\n  const counts = {};\n  rows.forEach(r => { if (r.Actor) counts[r.Actor] = (counts[r.Actor] || 0) + 1; });\n  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);\n  dataForLLM = 'Songs per actor (sorted):\\n' + sorted.map(e => `${e[0]}: ${e[1]} songs`).join('\\n');\n\n} else {\n  if (filtered.length === 0) {\n    dataForLLM = 'No matching songs found for this query.';\n  } else {\n    dataForLLM = `Found ${filtered.length} matching songs:\\n` +\n      filtered.map(r => `${r.Year} | ${r.Movie} | ${r.Songs} | ${r.Singer} | ${r.Actor}`).join('\\n');\n  }\n}\n\nconst prompt = `You are a Tamil film songs expert. Answer the user's question based only on the data provided below. Be concise.\n\nDATA:\n${dataForLLM}\n\nQUESTION: ${userQuestion}\n\nAnswer clearly. Use a numbered list if listing multiple items.`;\n\nreturn [{ json: { prompt, chatId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        64
+      ],
+      "id": "e1f3bbb7-d76e-4c61-bbdb-62eb3bcd8436",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1v0ptEQNAeFvObcYtRQ2QfsW6ggEH89QvsRAb-rutAOw/values/Ilayaraja%20Songs!A:G?key=<REDACTED>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1008,
+        64
+      ],
+      "id": "289faad4-669d-462e-95fc-8c54642e2d14",
+      "name": "Get Songs"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "groqApi",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ \"model\": \"llama-3.3-70b-versatile\", \"messages\": [{ \"role\": \"system\", \"content\": \"You are a Tamil film songs expert. Answer concisely based on the data given.\" }, { \"role\": \"user\", \"content\": $json.prompt }] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        64
+      ],
+      "id": "dc5f9e02-efa5-438d-92f5-b0618dff5ec7",
+      "name": "HTTP Request",
+      "credentials": {
+        "groqApi": {
+          "id": "i0pwbLggyAIu5PjM",
+          "name": "KailashGroqKey"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        736,
+        64
+      ],
+      "id": "0ba715dc-408d-4ee8-8b57-2c9787455b6b",
+      "name": "Telegram Trigger",
+      "webhookId": "91569e10-1db0-4019-8668-be0964495f6e",
+      "credentials": {
+        "telegramApi": {
+          "id": "zktPbdZylMZsFyWC",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Code in JavaScript').first().json.chatId }}",
+        "text": "={{ $json.choices[0].message.content }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1632,
+        64
+      ],
+      "id": "7fc88786-f5a6-486f-903c-844f3d6feafd",
+      "name": "Send a text message",
+      "webhookId": "7c5e526a-d0b8-461c-91b7-17f26233be69",
+      "credentials": {
+        "telegramApi": {
+          "id": "zktPbdZylMZsFyWC",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Songs": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Songs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "56592551552bae52e625b9dadd79b7aa12b9e4ed1fe1b19d8826ec91c08fdfe9"
+  }
+}
